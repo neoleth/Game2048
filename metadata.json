@@ -1,0 +1,5 @@
+{
+  "name": "AI 2048 Master",
+  "description": "A strategic 2048 game powered by an AI master agent.",
+  "requestFramePermissions": []
+}
