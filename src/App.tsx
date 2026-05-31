@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createBoard, addRandomTile, move, checkGameOver, Board, Direction } from './gameLogic';
 import { getAIAgentSuggestion, AgentResponse } from './services/aiAgentService';
+import { genLayerStartGame, genLayerSubmitMove, genLayerGenerateChallenge } from './services/genlayerService';
 
 import { GENLAYER_CONTRACT_ADDRESS } from './constants';
 
@@ -13,8 +14,12 @@ export default function App() {
   const [judgeVerdict, setJudgeVerdict] = useState<AgentResponse | null>(null);
   const [dailyChallenge, setDailyChallenge] = useState<AgentResponse['challenge'] | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [onChainStatus, setOnChainStatus] = useState<"disconnected" | "syncing" | "synced" | "error">("disconnected");
   
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Temporary mock "user address" for hackathon demo
+  const mockPlayerAddress = "0xPlayerAddress123456789";
 
   const boardRef = useRef(board);
   const scoreRef = useRef(score);
@@ -43,6 +48,15 @@ export default function App() {
     setBoard(boardWithNewTile);
     setScore(newScore);
     setMoveHistory(newHistory);
+    
+    // Background async sync to GenLayer
+    setOnChainStatus("syncing");
+    genLayerSubmitMove(mockPlayerAddress, direction)
+      .then(() => setOnChainStatus("synced"))
+      .catch((err) => {
+        console.error("GenLayer Sync Error:", err);
+        setOnChainStatus("error");
+      });
     
     if (checkGameOver(boardWithNewTile)) {
       gameOverRef.current = true;
@@ -124,7 +138,18 @@ export default function App() {
   const generateChallenge = async () => {
     setIsAiThinking(true);
     setApiError(null);
+    setOnChainStatus("syncing");
+    
     try {
+      // 1. Call on-chain generator logic
+      try {
+        await genLayerGenerateChallenge();
+        setOnChainStatus("synced");
+      } catch (e) {
+        console.warn("Failed to generate on-chain challenge, falling back to local...", e);
+        setOnChainStatus("error");
+      }
+
       const emptyBoard = createBoard();
       const challengeRes = await getAIAgentSuggestion(emptyBoard, 0, [], "challenge");
       if (challengeRes.challenge) {
@@ -155,6 +180,14 @@ export default function App() {
     gameOverRef.current = false;
     setJudgeVerdict(null);
     setAiSuggestion(null);
+
+    setOnChainStatus("syncing");
+    genLayerStartGame(mockPlayerAddress)
+      .then(() => setOnChainStatus("synced"))
+      .catch((err) => {
+        console.error("GenLayer Sync Error:", err);
+        setOnChainStatus("error");
+      });
   };
 
   const getTileColor = (val: number) => {
@@ -181,7 +214,18 @@ export default function App() {
         <div className="flex justify-between items-end mb-6">
           <div>
             <h1 className="text-4xl font-bold text-white">2048</h1>
-            <p className="text-sm font-medium text-zinc-400 mt-1">AI Strategic Master</p>
+            <p className="text-sm font-medium text-zinc-400 mt-1 flex items-center gap-2">
+              AI Strategic Master
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold
+                ${onChainStatus === 'synced' ? 'bg-green-900/40 text-green-400 border border-green-800' : 
+                  onChainStatus === 'syncing' ? 'bg-blue-900/40 text-blue-400 border border-blue-800 animate-pulse' : 
+                  onChainStatus === 'error' ? 'bg-red-900/40 text-red-400 border border-red-800' :
+                  'bg-zinc-800 text-zinc-500'}`}>
+                {onChainStatus === 'synced' ? '● On-Chain' : 
+                 onChainStatus === 'syncing' ? '◌ Syncing...' : 
+                 onChainStatus === 'error' ? '! Chain Error' : '○ Local'}
+              </span>
+            </p>
           </div>
           <div className="flex gap-2">
             <div className="bg-zinc-900 border border-zinc-800 text-white px-4 py-2 rounded-lg text-center">
